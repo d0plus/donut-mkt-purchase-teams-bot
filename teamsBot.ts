@@ -1,4 +1,5 @@
 import { ActivityTypes } from "@microsoft/agents-activity";
+import { BlobServiceClient } from "@azure/storage-blob";
 import {
   AgentApplication,
   AttachmentDownloader,
@@ -6,7 +7,6 @@ import {
   TurnContext,
   TurnState,
 } from "@microsoft/agents-hosting";
-import { BlobServiceClient } from "@azure/storage-blob";
 import { Client } from "@microsoft/microsoft-graph-client";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import * as dotenv from "dotenv";
@@ -156,6 +156,9 @@ teamsBot.activity(
     // Echo back users request
     await context.sendActivity(`[${count}] you said: ${context.activity.text}`);
     await context.sendActivity("I got you");
+    // 測試寫入 hardcode JSON 到 blob
+    const testData = { msg: "hello world", time: new Date().toISOString() };
+    await uploadJsonToBlob(`test_${Date.now()}.json`, testData);
   }
 );
 
