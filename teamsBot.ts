@@ -156,9 +156,30 @@ teamsBot.activity(
     // Echo back users request
     await context.sendActivity(`[${count}] you said: ${context.activity.text}`);
     await context.sendActivity("I got you");
-    // 測試寫入 hardcode JSON 到 blob
-    const testData = { msg: "hello world", time: new Date().toISOString() };
-    await uploadJsonToBlob(`test_${Date.now()}.json`, testData);
+    // 收集 Teams 訊息者資訊與會話資訊
+    const talkerInfo = {
+      msg: context.activity.text,
+      time: new Date().toISOString(),
+      from: context.activity.from,
+      conversation: context.activity.conversation,
+      channelId: context.activity.channelId,
+      serviceUrl: context.activity.serviceUrl,
+      recipient: context.activity.recipient,
+      teamsChannelId: context.activity.channelData?.channel?.id || null,
+      teamsTeamId: context.activity.channelData?.team?.id || null,
+      conversationType: context.activity.conversation?.conversationType || null,
+      tenantId: context.activity.conversation?.tenantId || null,
+      id: context.activity.id,
+      replyToId: context.activity.replyToId,
+      summary: {
+        userId: context.activity.from?.id,
+        aadObjectId: context.activity.from?.aadObjectId,
+        conversationId: context.activity.conversation?.id,
+        teamsTeamId: context.activity.channelData?.team?.id || null,
+        teamsChannelId: context.activity.channelData?.channel?.id || null,
+      }
+    };
+    await uploadJsonToBlob(`teamsTalker_${Date.now()}.json`, talkerInfo);
   }
 );
 
