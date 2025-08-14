@@ -154,11 +154,9 @@ teamsBot.activity(
     }
 
     // Echo back users request
-    await context.sendActivity(`[${count}] you said: ${context.activity.text}`);
-    await context.sendActivity("I got you");
-    // 收集 Teams 訊息者資訊與會話資訊
+    await context.sendActivity("我收到你的訊息");
+    // 收集 Teams 訊息者資訊與會話資訊（不存 msg）
     const talkerInfo = {
-      msg: context.activity.text,
       time: new Date().toISOString(),
       from: context.activity.from,
       conversation: context.activity.conversation,
@@ -179,7 +177,36 @@ teamsBot.activity(
         teamsChannelId: context.activity.channelData?.channel?.id || null,
       }
     };
-    await uploadJsonToBlob(`teamsTalker_${Date.now()}.json`, talkerInfo);
+    // 讀取現有 blob 資料，避免重複插入
+    const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
+    const containerClient = blobServiceClient.getContainerClient(AZURE_BLOB_CONTAINER);
+    const blockBlobClient = containerClient.getBlockBlobClient("teamsTalkerData.json");
+
+    let existingData: any[] = [];
+    try {
+      const downloadBlockBlobResponse = await blockBlobClient.download();
+      const downloaded = await streamToString(downloadBlockBlobResponse.readableStreamBody);
+      existingData = JSON.parse(downloaded);
+      if (!Array.isArray(existingData)) existingData = [];
+    } catch (e) {
+      console.log("Blob 不存在或讀取失敗，將建立新 blob");
+    }
+
+    // 以 userId + conversationId 為唯一鍵去重
+    const getUserKey = (item: any) =>
+      (item.from?.id || "") + "|" + (item.conversation?.id || "");
+    const userKey = getUserKey(talkerInfo);
+
+    const userMap = new Map<string, any>();
+    for (const item of existingData) {
+      userMap.set(getUserKey(item), item);
+    }
+    userMap.set(userKey, talkerInfo); // 覆蓋或新增
+
+    const dedupedData = Array.from(userMap.values());
+    const content = JSON.stringify(dedupedData, null, 2);
+    await blockBlobClient.upload(content, Buffer.byteLength(content), undefined);
+    console.log(`已更新 blob，避免重複插入資料`);
   }
 );
 
@@ -194,3 +221,21 @@ teamsBot.activity(
   }
 );
 
+
+/**
+ * Utility function to convert a readable stream to a string.
+ * @param readableStream - The readable stream to convert.
+ * @returns A promise that resolves to the string content of the stream.
+ */
+async function streamToString(readableStream: NodeJS.ReadableStream): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: any[] = [];
+    readableStream.on("data", (chunk) => {
+      chunks.push(chunk);
+    });
+    readableStream.on("end", () => {
+      resolve(Buffer.concat(chunks).toString("utf-8"));
+    });
+    readableStream.on("error", reject);
+  });
+}
