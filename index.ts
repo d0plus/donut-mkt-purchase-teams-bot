@@ -75,7 +75,7 @@ function proactiveSendAll() {
 // 在 adapter 宣告後呼叫
 
 // 測試用：定時只針對特定用戶推播
-const TEST_USER_ID = "29:1Q4-I_mzDn-Bc1P1F-g4REhQnsW0wUvjshl6duLE4v78twa4RsopLh8jyad-p0ReV_g-VinYKJci5x9se6jQm4A";
+const TEST_USER_ID = "29:n tQ4-I_mzDn-Bc1P1F-g4REhQnsW0wUvjshl6duLE4v78twa4RsopLh8jyad-p0ReV_g-VinYKJci5x9se6jQm4A";
 const TEST_CONVERSATION_ID = "a:16__v_SUT0yXZ5YEWD6vMWfgH7YIaccfDI-UuKMMclVLVNRO-_Rs9B7zQ90k1pyDd9ss1KrEXOZoCk-Oipou_eBbgWmGkHn1PZy7IJbjfJ-WsmarT-mZ6tRHDg7uwyjaH";
 const TEST_MESSAGE = "這是測試用定時主動推播訊息";
 
@@ -90,6 +90,7 @@ import {
 import express, { Response } from "express";
 
 import { teamsBot } from "./teamsBot";
+import { sendTeamsMessageWithUserToken } from "./graphToBlob";
 
 // Create authentication configuration
 const authConfig: AuthConfiguration = loadAuthConfigFromEnv();
@@ -249,78 +250,52 @@ async function streamToString(readableStream: NodeJS.ReadableStream | null): Pro
   });
 }
 
-/**
- * === 10 秒定時 HTTP POST 主動推播訊息（取代 Bot Framework 方式） ===
- * 會讀取 blob 內所有 Teams 使用者 reference，每 10 秒對每位使用者發送一則訊息到本機 /api/messages
- * 需帶 JWT 驗證，訊息內容皆為 "這是 HTTP POST 主動推播訊息"
- */
-import fetch from "node-fetch";
-import jwt from "jsonwebtoken";
-
-const POST_MESSAGE_INTERVAL = 10000; // 10 秒
-const POST_MESSAGE_TEXT = "這是 HTTP POST 主動推播訊息";
-
-async function getJwtToken() {
-  // 產生 JWT token，與 authorizeJWT(authConfig) 相同邏輯
-  // 這裡假設 authConfig.secret 為簽章密鑰
-  const payload = {
-    iss: authConfig.clientId,
-    sub: authConfig.clientId,
-    aud: "api://bot",
-    iat: Math.floor(Date.now() / 1000),
-    exp: Math.floor(Date.now() / 1000) + 60 * 5,
-  };
-  // 使用 clientSecret 作為 JWT 簽章密鑰
-  const secret = (authConfig as any).secret || (authConfig as any).clientSecret || "secret";
-  return jwt.sign(payload, secret);
-}
-
-async function postProactiveMessages() {
+ /**
+  * 取得 POST 資料，從 blob 比對 staffEmail，發送 Teams 訊息
+  * 主流程：根據 postData.staffEmail 發送 Teams 訊息
+  */
+export async function handlePostAndNotifyStaff(postData: any) {
+  // 顯示所有收到的欄位與型別
+  console.log("[handlePostAndNotifyStaff] 收到來自網站的 POST 資料:", postData);
+  if (postData && typeof postData === "object") {
+    Object.keys(postData).forEach((k) => {
+      console.log(`[handlePostAndNotifyStaff] 欄位: ${k}, 型別: ${typeof postData[k]}, 值:`, postData[k]);
+    });
+  } else {
+    console.log("[handlePostAndNotifyStaff] postData 不是物件，實際型別:", typeof postData);
+  }
+  // 依據欄位內容組合訊息
+  const staffEmail = postData.staffEmail || "";
+  const content = postData.content;
+  const text = postData.text;
+  const message = typeof text === "string" && text.trim() ? text : (typeof content === "string" && content.trim() ? content : "you got order");
   try {
     const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING!;
     const AZURE_BLOB_CONTAINER = process.env.AZURE_BLOB_CONTAINER!;
     const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
     const containerClient = blobServiceClient.getContainerClient(AZURE_BLOB_CONTAINER);
-    const blockBlobClient = containerClient.getBlockBlobClient("teamsTalkerData.json");
-    const downloadBlockBlobResponse = await blockBlobClient.download();
+    const blockBlobClient = containerClient.getBlockBlobClient("tokens.json");
+    const downloadBlockBlobResponse = await blockBlobClient.download(0);
     const downloaded = await streamToString(downloadBlockBlobResponse.readableStreamBody);
-    const userData = JSON.parse(downloaded);
-
-    const jwtToken = await getJwtToken();
-
-    for (const user of userData) {
-      // recipient 應為 bot，from 應為 user
-      if (
-        user.conversation?.id &&
-        user.recipient?.id &&
-        user.from?.id
-      ) {
-        const activity = {
-          type: "message",
-          text: POST_MESSAGE_TEXT,
-          from: user.from,
-          recipient: user.recipient,
-          conversation: user.conversation,
-          channelId: user.channelId || "msteams",
-          serviceUrl: user.serviceUrl || "",
-        };
-        // 強制 POST 到 /api/messages endpoint，不用 user.serviceUrl
-        await fetch("http://localhost:" + (process.env.PORT || 3978) + "/api/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer " + jwtToken,
-          },
-          body: JSON.stringify(activity),
-        });
+    const tokens = JSON.parse(downloaded); // { [userId]: { accessToken, userInfo: { email, id } } }
+    let found = false;
+    for (const userId of Object.keys(tokens)) {
+      const entry = tokens[userId];
+      if (entry.userInfo?.email?.toLowerCase() === staffEmail.toLowerCase()) {
+        console.log(`[handlePostAndNotifyStaff] 找到對應 userId: ${userId}, email: ${entry.userInfo.email}`);
+        await sendTeamsMessageWithUserToken(entry.accessToken, entry.userInfo.id, message);
+        console.log(`已發送訊息給 ${staffEmail} (userId=${entry.userInfo.id})，訊息內容: ${message}`);
+        found = true;
+        break;
       }
     }
-  } catch (e) {
-    console.error("[HTTP POST Proactive] 發送失敗：", e);
+    if (!found) {
+      console.error("[handlePostAndNotifyStaff] 找不到對應的 staffEmail:", staffEmail);
+    }
+  } catch (err) {
+    console.error("[handlePostAndNotifyStaff] 發生例外錯誤:", err);
   }
 }
-
-setInterval(postProactiveMessages, POST_MESSAGE_INTERVAL);
 
 /** 
  * === 原有 Bot Framework 主動推播程式碼已註解保留 ===

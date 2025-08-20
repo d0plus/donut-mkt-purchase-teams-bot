@@ -81,7 +81,6 @@ async function insertToBlob(talkerInfo: any) {
 }
 
 // --- 10s Echo Interval Map ---
-const intervalMap = new Map<string, NodeJS.Timeout>();
 
 // --- Core Bot Handlers ---
 
@@ -144,9 +143,19 @@ teamsBot.activity(
     let count = state.conversation.count ?? 0;
     state.conversation.count = ++count;
 
-    await context.sendActivity("我收到你的訊息");
+    // 若 activity.channelId === "msteams" 且 from.role === "user"，代表 Teams 使用者主動發訊息，僅回覆固定文字
+    // 僅當 activity.type === "message" 時才回覆
+    if (context.activity.type === "message") {
+      if (context.activity.channelId === "msteams" && context.activity.from?.role === "user") {
+        await context.sendActivity("我收到你的訊息，目前為您服務中");
+        return;
+      } else {
+        // 僅 web post 或其他來源才 echo 原文
+        await context.sendActivity(context.activity.text || "我收到你的訊息，目前為您服務中");
+      }
+    }
 
-    // Collect info for blob
+    // 只有非 Teams 使用者主動訊息才執行 blob 更新
     const reference = {
       serviceUrl: context.activity.serviceUrl,
       channelId: context.activity.channelId,
@@ -184,26 +193,7 @@ teamsBot.activity(
 
     // Prepare conversation reference for proactive send
     const userKey = (context.activity.from?.id || "") + "|" + (context.activity.conversation?.id || "");
-    if (intervalMap.has(userKey)) {
-      clearInterval(intervalMap.get(userKey)!);
-      console.log(`[10s echo] Cleared previous interval for userKey: ${userKey}`);
-    }
-    const text = context.activity.text || "";
-    const ref = reference;
-    const interval = setInterval(async () => {
-      try {
-        console.log(`[10s echo] Sending to userKey: ${userKey}, text: ${text}`);
-        await (adapter as CloudAdapter).continueConversation(ref, async (ctx) => {
-          await ctx.sendActivity(`[10s echo] ${text}`);
-        });
-      } catch (e) {
-        console.error(`[10s echo] Error sending to userKey: ${userKey}`, e);
-        clearInterval(intervalMap.get(userKey)!);
-        intervalMap.delete(userKey);
-      }
-    }, 10000);
-    intervalMap.set(userKey, interval);
-    console.log(`[10s echo] Started interval for userKey: ${userKey}`);
+    // 已移除 10 秒 echo interval，這裡不再有任何 interval 處理
   }
 );
 
