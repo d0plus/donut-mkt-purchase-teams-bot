@@ -21,3 +21,5 @@ lib/
 
 # Dev tool directories
 /devTools/
+# Ignore generated Teams manifest
+appPackage/build/manifest.dev.json
