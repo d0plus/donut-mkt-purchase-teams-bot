@@ -194,10 +194,3 @@ export async function handlePostAndNotifyStaff(postData: any) {
     console.error("[handlePostAndNotifyStaff] 發生例外錯誤:", err);
   }
 }
-
-/** 
- * === 原有 Bot Framework 主動推播程式碼已註解保留 ===
- * 
- * function proactiveSendAll() { ... }
- * ...
- */
