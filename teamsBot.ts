@@ -192,26 +192,22 @@ teamsBot.activity(
     };
     const talkerInfo = {
       time: new Date().toISOString(),
-      reference,
-      from: context.activity.from,
-      conversation: context.activity.conversation,
-      channelId: context.activity.channelId,
-      serviceUrl: context.activity.serviceUrl,
-      recipient: context.activity.recipient,
-      teamsChannelId: context.activity.channelData?.channel?.id || null,
-      teamsTeamId: context.activity.channelData?.team?.id || null,
-      conversationType: context.activity.conversation?.conversationType || null,
-      tenantId: context.activity.conversation?.tenantId || null,
-      id: context.activity.id,
-      replyToId: context.activity.replyToId,
-      email: null, // 預設 email 欄位，稍後填入
-      summary: {
-        userId: context.activity.from?.id,
+      user: {
+        id: context.activity.from?.id,
+        name: context.activity.from?.name,
         aadObjectId: context.activity.from?.aadObjectId,
-        conversationId: context.activity.conversation?.id,
-        teamsTeamId: context.activity.channelData?.team?.id || null,
-        teamsChannelId: context.activity.channelData?.channel?.id || null,
-      }
+        email: null // 稍後填入
+      },
+      conversation: {
+        id: context.activity.conversation?.id,
+        tenantId: context.activity.conversation?.tenantId ?? context.activity.channelData?.tenant?.id,
+        type: context.activity.conversation?.conversationType || null
+      },
+      bot: {
+        id: context.activity.recipient?.id,
+        name: context.activity.recipient?.name
+      },
+      serviceUrl: context.activity.serviceUrl
     };
     // 取得 email，若查不到則不寫入 blob
     let email: string | null = null;
@@ -222,11 +218,11 @@ teamsBot.activity(
       console.error("查無 email，不寫入 blob，user:", context.activity.from);
       return;
     }
-    talkerInfo.email = email;
+    talkerInfo.user.email = email;
     await insertToBlob(talkerInfo);
 
     // Prepare conversation reference for proactive send
-    const userKey = (context.activity.from?.id || "") + "|" + (context.activity.conversation?.id || "");
+    // const userKey = (context.activity.from?.id || "") + "|" + (context.activity.conversation?.id || "");
     // 已移除 10 秒 echo interval，這裡不再有任何 interval 處理
   }
 );
