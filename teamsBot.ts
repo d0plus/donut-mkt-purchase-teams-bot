@@ -88,18 +88,31 @@ async function insertToBlob(talkerInfo: any) {
     if (!Array.isArray(existingData)) existingData = [];
   } catch (e) {}
 
-  const getUserKey = (item: any) =>
-    (item.from?.id || "") + "|" + (item.conversation?.id || "");
-  const userKey = getUserKey(talkerInfo);
+  // 以 userId 或 email 為唯一主鍵，若有則覆蓋，否則新增
+  const userId = talkerInfo.user.id || "";
+  const email = talkerInfo.user.email || "";
+  // rowName: teamsId_亂數 或 email_亂數
+  const random = Math.random().toString(36).substring(2, 10);
+  const rowName = (userId ? userId : email) + "_" + random;
+  talkerInfo.rowName = rowName;
 
-  const userMap = new Map<string, any>();
-  for (const item of existingData) {
-    userMap.set(getUserKey(item), item);
+  let foundIdx = -1;
+  for (let i = 0; i < existingData.length; i++) {
+    const item = existingData[i];
+    if ((item.user && (item.user.id === userId || (email && item.user.email === email)))) {
+      foundIdx = i;
+      break;
+    }
   }
-  userMap.set(userKey, talkerInfo);
+  if (foundIdx >= 0) {
+    // 保留原 rowName
+    talkerInfo.rowName = existingData[foundIdx].rowName || rowName;
+    existingData[foundIdx] = talkerInfo;
+  } else {
+    existingData.push(talkerInfo);
+  }
 
-  const dedupedData = Array.from(userMap.values());
-  const content = JSON.stringify(dedupedData, null, 2);
+  const content = JSON.stringify(existingData, null, 2);
   await blockBlobClient.upload(content, Buffer.byteLength(content), undefined);
 }
 
