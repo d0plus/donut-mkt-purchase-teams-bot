@@ -169,13 +169,18 @@ teamsBot.activity(
     // 若 activity.channelId === "msteams" 且 from.role === "user"，代表 Teams 使用者主動發訊息，僅回覆固定文字
     // 僅當 activity.type === "message" 時才回覆
     if (context.activity.type === "message") {
-      if (context.activity.channelId === "msteams" && context.activity.from?.role === "user") {
-        await context.sendActivity("我收到你的訊息，目前為您服務中");
+      // Web POST（帶有 channelData.webPost: true）→ echo text
+      if (context.activity.channelData && context.activity.channelData.webPost === true) {
+        await context.sendActivity(context.activity.text || "收到來自 Web 的訊息");
         return;
-      } else {
-        // 僅 web post 或其他來源才 echo 原文
-        await context.sendActivity(context.activity.text || "我收到你的訊息，目前為您服務中");
       }
+      // Teams 使用者主動訊息 → 回覆固定訊息
+      if (context.activity.channelId === "msteams" && context.activity.from?.role === "user") {
+        await context.sendActivity("我收到你的訊息，目前運行中");
+        return;
+      }
+      // 其他來源
+      await context.sendActivity("我收到你的訊息，目前運行中");
     }
 
     // 只有非 Teams 使用者主動訊息才執行 blob 更新
