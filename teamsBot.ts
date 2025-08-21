@@ -21,8 +21,6 @@ const msalConfig = {
     clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
   },
 };
-const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING || "";
-const AZURE_BLOB_CONTAINER = process.env.AZURE_BLOB_CONTAINER || "";
 const version = "0.2.14";
 
 interface ConversationState {
@@ -37,7 +35,7 @@ export const teamsBot = new AgentApplication<ApplicationTurnState>({
   fileDownloaders: [downloader],
 });
 
-// --- Utility: streamToString ---
+/* Utility: stream to string */
 export async function streamToString(readableStream: NodeJS.ReadableStream): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: any[] = [];
@@ -50,9 +48,8 @@ export async function streamToString(readableStream: NodeJS.ReadableStream): Pro
     readableStream.on("error", reject);
   });
 }
-// --- 取得 email by aadObjectId ---
+// Get email by aadObjectId
 async function getEmailByAadObjectId(aadObjectId: string): Promise<string | null> {
-  // 取得 application access token
   const msal = new ConfidentialClientApplication(msalConfig);
   const result = await msal.acquireTokenByClientCredential({
     scopes: ["https://graph.microsoft.com/.default"],
@@ -65,7 +62,6 @@ async function getEmailByAadObjectId(aadObjectId: string): Promise<string | null
   });
   try {
     const user = await client.api(`/users/${aadObjectId}`).get();
-    // mail 可能為空，userPrincipalName 幾乎一定有
     if (user.mail && user.mail.includes("@")) return user.mail;
     if (user.userPrincipalName && user.userPrincipalName.includes("@")) return user.userPrincipalName;
     return null;
@@ -74,12 +70,11 @@ async function getEmailByAadObjectId(aadObjectId: string): Promise<string | null
   }
 }
 
-// --- Blob Insert Helper ---
+// Insert to blob helper
 async function insertToBlob(talkerInfo: any) {
-  const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
-  const containerClient = blobServiceClient.getContainerClient(AZURE_BLOB_CONTAINER);
+  const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING || "");
+  const containerClient = blobServiceClient.getContainerClient(process.env.AZURE_BLOB_CONTAINER || "");
 
-  // 以 userId 或 email 作為檔名
   const userId = talkerInfo.user.id || "";
   const email = talkerInfo.user.email || "";
   const fileKey = userId ? `staff_${userId}.json` : (email ? `staff_${email}.json` : `staff_unknown_${Date.now()}.json`);
@@ -90,9 +85,7 @@ async function insertToBlob(talkerInfo: any) {
   await blockBlobClient.upload(content, Buffer.byteLength(content), undefined);
 }
 
-// --- 10s Echo Interval Map ---
 
-// --- Core Bot Handlers ---
 
 // /reset: clear conversation state
 teamsBot.message("/reset", async (context: TurnContext, state: ApplicationTurnState) => {
@@ -146,31 +139,25 @@ teamsBot.activity(
   }
 );
 
-// Main message handler: reply, insert to blob, and start 10s echo
+// Main message handler: reply, insert to blob
 teamsBot.activity(
   ActivityTypes.Message,
   async (context: TurnContext, state: ApplicationTurnState) => {
     let count = state.conversation.count ?? 0;
     state.conversation.count = ++count;
 
-    // 若 activity.channelId === "msteams" 且 from.role === "user"，代表 Teams 使用者主動發訊息，僅回覆固定文字
-    // 僅當 activity.type === "message" 時才回覆
     if (context.activity.type === "message") {
-      // Web POST（帶有 channelData.webPost: true）→ echo text
       if (context.activity.channelData && context.activity.channelData.webPost === true) {
-        await context.sendActivity(context.activity.text || "收到來自 Web 的訊息");
+        await context.sendActivity(context.activity.text || "我收到你的訊息，目前運行中");
         return;
       }
-      // Teams 使用者主動訊息 → 回覆固定訊息
       if (context.activity.channelId === "msteams" && context.activity.from?.role === "user") {
         await context.sendActivity("我收到你的訊息，目前運行中");
         return;
       }
-      // 其他來源
       await context.sendActivity("我收到你的訊息，目前運行中");
     }
 
-    // 只有非 Teams 使用者主動訊息才執行 blob 更新
     const reference = {
       serviceUrl: context.activity.serviceUrl,
       channelId: context.activity.channelId,
@@ -188,7 +175,7 @@ teamsBot.activity(
         id: context.activity.from?.id,
         name: context.activity.from?.name,
         aadObjectId: context.activity.from?.aadObjectId,
-        email: null // 稍後填入
+        email: null
       },
       conversation: {
         id: context.activity.conversation?.id,
@@ -201,21 +188,16 @@ teamsBot.activity(
       },
       serviceUrl: context.activity.serviceUrl
     };
-    // 取得 email，若查不到則不寫入 blob
     let email: string | null = null;
     if (context.activity.from?.aadObjectId) {
       email = await getEmailByAadObjectId(context.activity.from.aadObjectId);
     }
     if (!email) {
-      console.error("查無 email，不寫入 blob，user:", context.activity.from);
+      console.error("No email found, not writing to blob, user:", context.activity.from);
       return;
     }
     talkerInfo.user.email = email;
     await insertToBlob(talkerInfo);
-
-    // Prepare conversation reference for proactive send
-    // const userKey = (context.activity.from?.id || "") + "|" + (context.activity.conversation?.id || "");
-    // 已移除 10 秒 echo interval，這裡不再有任何 interval 處理
   }
 );
 
