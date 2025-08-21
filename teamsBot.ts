@@ -78,41 +78,15 @@ async function getEmailByAadObjectId(aadObjectId: string): Promise<string | null
 async function insertToBlob(talkerInfo: any) {
   const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
   const containerClient = blobServiceClient.getContainerClient(AZURE_BLOB_CONTAINER);
-  const blockBlobClient = containerClient.getBlockBlobClient("teamsTalkerData.json");
 
-  let existingData: any[] = [];
-  try {
-    const downloadBlockBlobResponse = await blockBlobClient.download();
-    const downloaded = await streamToString(downloadBlockBlobResponse.readableStreamBody);
-    existingData = JSON.parse(downloaded);
-    if (!Array.isArray(existingData)) existingData = [];
-  } catch (e) {}
-
-  // 以 userId 或 email 為唯一主鍵，若有則覆蓋，否則新增
+  // 以 userId 或 email 作為檔名
   const userId = talkerInfo.user.id || "";
   const email = talkerInfo.user.email || "";
-  // rowName: teamsId_亂數 或 email_亂數
-  const random = Math.random().toString(36).substring(2, 10);
-  const rowName = (userId ? userId : email) + "_" + random;
-  talkerInfo.rowName = rowName;
+  const fileKey = userId ? `staff_${userId}.json` : (email ? `staff_${email}.json` : `staff_unknown_${Date.now()}.json`);
+  talkerInfo.rowName = userId || email;
 
-  let foundIdx = -1;
-  for (let i = 0; i < existingData.length; i++) {
-    const item = existingData[i];
-    if ((item.user && (item.user.id === userId || (email && item.user.email === email)))) {
-      foundIdx = i;
-      break;
-    }
-  }
-  if (foundIdx >= 0) {
-    // 保留原 rowName
-    talkerInfo.rowName = existingData[foundIdx].rowName || rowName;
-    existingData[foundIdx] = talkerInfo;
-  } else {
-    existingData.push(talkerInfo);
-  }
-
-  const content = JSON.stringify(existingData, null, 2);
+  const blockBlobClient = containerClient.getBlockBlobClient(fileKey);
+  const content = JSON.stringify(talkerInfo, null, 2);
   await blockBlobClient.upload(content, Buffer.byteLength(content), undefined);
 }
 
