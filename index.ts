@@ -1,28 +1,5 @@
 import { BlobServiceClient } from "@azure/storage-blob";
-/*
-// MSAL 登入與 callback 路由
-import { ConfidentialClientApplication, Configuration } from "@azure/msal-node";
 
-const msalConfig: Configuration = {
-  auth: {
-    clientId: process.env.AZURE_AD_CLIENT_ID || "",
-    authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID || ""}`,
-    clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
-  },
-};
-const REDIRECT_URI = process.env.REDIRECT_URI || "https://bot4a8ac5.azurewebsites.net/auth/callback";
-const msalClient = new ConfidentialClientApplication(msalConfig);
-
-const SCOPES = ["User.Read", "Chat.ReadWrite", "ChatMessage.Send", "offline_access"];
-*/
-
-// 啟動時自動批次推播訊息
-
-// 啟動時主動推播訊息
-/**
- * 啟動時主動推播訊息（Bot Framework 標準 proactive message）
- * 必須等 adapter 宣告後再執行
- */
 function proactiveSendAll() {
   try {
     const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING!;
@@ -128,86 +105,7 @@ adapter.onTurnError = onTurnErrorHandler;
 const server = express();
 server.use(express.json());
 
-// MSAL 登入與 callback 路由（需放在 JWT middleware 之前）
-/*
-server.get("/auth/login", (req, res) => {
-  const authUrl = msalClient.getAuthCodeUrl({
-    scopes: SCOPES,
-    redirectUri: REDIRECT_URI,
-  });
-  authUrl.then((url) => res.redirect(url));
-});
 
-server.get("/auth/callback", async (req, res) => {
-  const code = req.query.code as string;
-  if (!code) {
-    res.status(400).send("No code found in callback");
-    return;
-  }
-  try {
-    const tokenResponse = await msalClient.acquireTokenByCode({
-      code,
-      scopes: SCOPES,
-      redirectUri: REDIRECT_URI,
-    });
-    // 儲存 userId 與 accessToken 到 tokens.json
-    const userId = tokenResponse.account?.homeAccountId || tokenResponse.account?.username || "unknown";
-    // 儲存到 Azure Blob Storage
-    const AZURE_STORAGE_CONNECTION_STRING = process.env.AZURE_STORAGE_CONNECTION_STRING!;
-    const AZURE_BLOB_CONTAINER = process.env.AZURE_BLOB_CONTAINER!;
-    const blobServiceClient = BlobServiceClient.fromConnectionString(AZURE_STORAGE_CONNECTION_STRING);
-    const containerClient = blobServiceClient.getContainerClient(AZURE_BLOB_CONTAINER);
-    const blockBlobClient = containerClient.getBlockBlobClient("tokens.json");
-    let tokens: Record<string, any> = {};
-    try {
-      const downloadBlockBlobResponse = await blockBlobClient.download();
-      const downloaded = await streamToString(downloadBlockBlobResponse.readableStreamBody);
-      tokens = JSON.parse(downloaded);
-    } catch (e) {
-      // blob 不存在時忽略
-    }
-    // 取得更多 Teams 使用者資訊
-    let userInfo = {};
-    try {
-      const fetch = (await import("node-fetch")).default;
-      const graphRes = await fetch("https://graph.microsoft.com/v1.0/me", {
-        headers: { Authorization: `Bearer ${tokenResponse.accessToken}` }
-      });
-      if (graphRes.ok) {
-        userInfo = await graphRes.json();
-      }
-    } catch (e) {
-      userInfo = { error: "Failed to fetch user info" };
-    }
-    tokens[userId] = {
-      accessToken: tokenResponse.accessToken,
-      expiresOn: tokenResponse.expiresOn,
-      userInfo
-    };
-    const content = JSON.stringify(tokens, null, 2);
-    await blockBlobClient.upload(content, Buffer.byteLength(content), undefined);
-    // 登入成功後自動導回 Teams 或顯示可關閉視窗
-    res.send(`<html>
-      <body>
-        <h2>登入成功，access token 已儲存到 Azure Blob。</h2>
-        <script>
-          if (window.opener) {
-            window.opener.postMessage('auth-success', '*');
-            window.close();
-          }
-        </script>
-        <p>你可以關閉此視窗並回到 Teams。</p>
-      </body>
-    </html>`);
-  } catch (err) {
-    res.status(500).send("取得 access token 失敗：" + (err as Error).message);
-  }
-});
-*/
-
-/**
- * 僅對自訂 API 路由啟用 JWT 驗證，避免攔截 Bot Framework 請求
- */
 server.use("/api/notify", authorizeJWT(authConfig));
 
 // Listen for incoming requests.
