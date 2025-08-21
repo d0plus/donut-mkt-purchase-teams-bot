@@ -50,6 +50,29 @@ export async function streamToString(readableStream: NodeJS.ReadableStream): Pro
     readableStream.on("error", reject);
   });
 }
+// --- 取得 email by aadObjectId ---
+async function getEmailByAadObjectId(aadObjectId: string): Promise<string | null> {
+  // 取得 application access token
+  const msal = new ConfidentialClientApplication(msalConfig);
+  const result = await msal.acquireTokenByClientCredential({
+    scopes: ["https://graph.microsoft.com/.default"],
+  });
+  const accessToken = result?.accessToken;
+  if (!accessToken) return null;
+
+  const client = Client.init({
+    authProvider: (done) => done(null, accessToken),
+  });
+  try {
+    const user = await client.api(`/users/${aadObjectId}`).get();
+    // mail 可能為空，userPrincipalName 幾乎一定有
+    if (user.mail && user.mail.includes("@")) return user.mail;
+    if (user.userPrincipalName && user.userPrincipalName.includes("@")) return user.userPrincipalName;
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
 
 // --- Blob Insert Helper ---
 async function insertToBlob(talkerInfo: any) {
@@ -181,6 +204,7 @@ teamsBot.activity(
       tenantId: context.activity.conversation?.tenantId || null,
       id: context.activity.id,
       replyToId: context.activity.replyToId,
+      email: null, // 預設 email 欄位，稍後填入
       summary: {
         userId: context.activity.from?.id,
         aadObjectId: context.activity.from?.aadObjectId,
@@ -189,6 +213,16 @@ teamsBot.activity(
         teamsChannelId: context.activity.channelData?.channel?.id || null,
       }
     };
+    // 取得 email，若查不到則不寫入 blob
+    let email: string | null = null;
+    if (context.activity.from?.aadObjectId) {
+      email = await getEmailByAadObjectId(context.activity.from.aadObjectId);
+    }
+    if (!email) {
+      console.error("查無 email，不寫入 blob，user:", context.activity.from);
+      return;
+    }
+    talkerInfo.email = email;
     await insertToBlob(talkerInfo);
 
     // Prepare conversation reference for proactive send
