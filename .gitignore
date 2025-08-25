@@ -1,6 +1,10 @@
 # TeamsFx files
 env/.env.*.user
 env/.env.local
+env/.env.dev
+env/.env.playground
+env/.env.env
+
 .localConfigs.playground
 .localConfigs
 .notification.localstore.json
