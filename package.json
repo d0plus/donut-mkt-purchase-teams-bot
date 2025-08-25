@@ -28,7 +28,8 @@
         "@microsoft/agents-hosting": "^0.2.14",
         "@microsoft/microsoft-graph-client": "^3.0.7",
         "dotenv": "^17.2.1",
-        "express": "^5.0.1"
+        "express": "^5.0.1",
+        "isomorphic-fetch": "^3.0.0"
     },
     "devDependencies": {
         "@types/express": "^5.0.0",
