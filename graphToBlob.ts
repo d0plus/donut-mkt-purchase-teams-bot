@@ -5,7 +5,6 @@ import { ConfidentialClientApplication } from "@azure/msal-node";
 import * as dotenv from "dotenv";
 dotenv.config();
 
-
 /* Azure AD config */
 const msalConfig = {
   auth: {

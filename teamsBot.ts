@@ -1,27 +1,12 @@
 import { ActivityTypes } from "@microsoft/agents-activity";
-import { BlobServiceClient } from "@azure/storage-blob";
 import {
   AgentApplication,
   AttachmentDownloader,
   MemoryStorage,
   TurnContext,
   TurnState,
-  CloudAdapter,
-} from "@microsoft/agents-hosting";
-import { Client } from "@microsoft/microsoft-graph-client";
-import { ConfidentialClientApplication } from "@azure/msal-node";
-import * as dotenv from "dotenv";
-import { adapter } from "./index";
-dotenv.config();
-
-const msalConfig = {
-  auth: {
-    clientId: process.env.AZURE_AD_CLIENT_ID || "",
-    authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID || ""}`,
-    clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
-  },
-};
-const version = "0.2.14";
+} from "@microsoft/agents-hosting";``
+import { version } from "@microsoft/agents-hosting/package.json";
 
 interface ConversationState {
   count: number;
@@ -29,89 +14,35 @@ interface ConversationState {
 type ApplicationTurnState = TurnState<ConversationState>;
 
 const downloader = new AttachmentDownloader();
+
+// Define storage and application
 const storage = new MemoryStorage();
 export const teamsBot = new AgentApplication<ApplicationTurnState>({
   storage,
   fileDownloaders: [downloader],
 });
 
-/* Utility: stream to string */
-export async function streamToString(readableStream: NodeJS.ReadableStream): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: any[] = [];
-    readableStream.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
-    readableStream.on("end", () => {
-      resolve(Buffer.concat(chunks).toString("utf-8"));
-    });
-    readableStream.on("error", reject);
-  });
-}
-// Get email by aadObjectId
-async function getEmailByAadObjectId(aadObjectId: string): Promise<string | null> {
-  const msal = new ConfidentialClientApplication(msalConfig);
-  const result = await msal.acquireTokenByClientCredential({
-    scopes: ["https://graph.microsoft.com/.default"],
-  });
-  const accessToken = result?.accessToken;
-  if (!accessToken) return null;
-
-  const client = Client.init({
-    authProvider: (done) => done(null, accessToken),
-  });
-  try {
-    const user = await client.api(`/users/${aadObjectId}`).get();
-    if (user.mail && user.mail.includes("@")) return user.mail;
-    if (user.userPrincipalName && user.userPrincipalName.includes("@")) return user.userPrincipalName;
-    return null;
-  } catch (e) {
-    return null;
-  }
-}
-
-// Insert to blob helper
-async function insertToBlob(talkerInfo: any) {
-  const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING || "");
-  const containerClient = blobServiceClient.getContainerClient(process.env.AZURE_BLOB_CONTAINER || "");
-
-  const userId = talkerInfo.user.id || "";
-  const email = talkerInfo.user.email || "";
-  const fileKey = userId ? `staff_${userId}.json` : (email ? `staff_${email}.json` : `staff_unknown_${Date.now()}.json`);
-  talkerInfo.rowName = userId || email;
-
-  const blockBlobClient = containerClient.getBlockBlobClient(fileKey);
-  const content = JSON.stringify(talkerInfo, null, 2);
-  await blockBlobClient.upload(content, Buffer.byteLength(content), undefined);
-}
-
-
-
-// /reset: clear conversation state
+// Listen for user to say '/reset' and then delete conversation state
 teamsBot.message("/reset", async (context: TurnContext, state: ApplicationTurnState) => {
   state.deleteConversationState();
   await context.sendActivity("Ok I've deleted the current conversation state.");
 });
 
-// /count: show message count
 teamsBot.message("/count", async (context: TurnContext, state: ApplicationTurnState) => {
   const count = state.conversation.count ?? 0;
   await context.sendActivity(`The count is ${count}`);
 });
 
-// /diag: show activity
 teamsBot.message("/diag", async (context: TurnContext, state: ApplicationTurnState) => {
   await state.load(context, storage);
   await context.sendActivity(JSON.stringify(context.activity));
 });
 
-// /state: show state
 teamsBot.message("/state", async (context: TurnContext, state: ApplicationTurnState) => {
   await state.load(context, storage);
   await context.sendActivity(JSON.stringify(state));
 });
 
-// /runtime: show runtime info
 teamsBot.message("/runtime", async (context: TurnContext, state: ApplicationTurnState) => {
   const runtime = {
     nodeversion: process.version,
@@ -120,7 +51,6 @@ teamsBot.message("/runtime", async (context: TurnContext, state: ApplicationTurn
   await context.sendActivity(JSON.stringify(runtime));
 });
 
-// Welcome on membersAdded
 teamsBot.conversationUpdate(
   "membersAdded",
   async (context: TurnContext, state: ApplicationTurnState) => {
@@ -130,81 +60,115 @@ teamsBot.conversationUpdate(
   }
 );
 
-// Email type: auto reply
-teamsBot.activity(
-  (context) => context.activity.type === "email" ||
-    (context.activity.channelData && context.activity.channelData.email),
-  async (context, state) => {
-    await context.sendActivity("i got it");
-  }
-);
-
-// Main message handler: reply, insert to blob
+// Listen for ANY message to be received. MUST BE AFTER ANY OTHER MESSAGE HANDLERS
 teamsBot.activity(
   ActivityTypes.Message,
   async (context: TurnContext, state: ApplicationTurnState) => {
+    // Increment count state
     let count = state.conversation.count ?? 0;
     state.conversation.count = ++count;
 
-    if (context.activity.type === "message") {
-      if (context.activity.channelData && context.activity.channelData.webPost === true) {
-        await context.sendActivity(context.activity.text || "我收到你的訊息，目前運行中");
-        return;
-      }
-      if (context.activity.channelId === "msteams" && context.activity.from?.role === "user") {
-        await context.sendActivity("我收到你的訊息，目前運行中");
-        return;
-      }
-      await context.sendActivity("我收到你的訊息，目前運行中");
+    // Log received Teams message
+    console.log("[teamsBot] 收到 Teams 訊息：", {
+      from: context.activity.from,
+      text: context.activity.text,
+      conversation: context.activity.conversation,
+      channelId: context.activity.channelId,
+      timestamp: context.activity.timestamp
+    });
+
+    // 若來自 webPost，直接回覆 payload.text
+    if (context.activity.channelData && context.activity.channelData.webPost && context.activity.text) {
+      await context.sendActivity(context.activity.text);
+    } else {
+      // 回覆固定繁體中文訊息
+      await context.sendActivity("我已收到你的訊息，目前機器人運作正常");
     }
 
-    const reference = {
-      serviceUrl: context.activity.serviceUrl,
-      channelId: context.activity.channelId,
-      conversation: {
-        id: context.activity.conversation?.id,
-        tenantId: context.activity.conversation?.tenantId ?? context.activity.channelData?.tenant?.id,
-        conversationType: context.activity.conversation?.conversationType
-      },
-      bot: context.activity.recipient,
-      user: context.activity.from
-    };
-    const talkerInfo = {
-      time: new Date().toISOString(),
-      user: {
-        id: context.activity.from?.id,
-        name: context.activity.from?.name,
-        aadObjectId: context.activity.from?.aadObjectId,
-        email: null
-      },
-      conversation: {
-        id: context.activity.conversation?.id,
-        tenantId: context.activity.conversation?.tenantId ?? context.activity.channelData?.tenant?.id,
-        type: context.activity.conversation?.conversationType || null
-      },
-      bot: {
-        id: context.activity.recipient?.id,
-        name: context.activity.recipient?.name
-      },
-      serviceUrl: context.activity.serviceUrl
-    };
-    let email: string | null = null;
-    if (context.activity.from?.aadObjectId) {
-      email = await getEmailByAadObjectId(context.activity.from.aadObjectId);
+    // 新增：收到 Teams 訊息時寫入 blob
+    try {
+      const { from, text, conversation, channelId, timestamp } = context.activity;
+      // 直接靜態 import，避免動態 import 路徑錯誤
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { uploadTextToBlob } = require("./UploadToBlob");
+      const blobName = `teamsmsg-${Date.now()}.json`;
+      // 取得 email 欄位（如 botsimon 專案）
+      let email = "";
+      if (from?.aadObjectId) {
+        try {
+          // 這裡可根據實際情境呼叫 Graph API 查詢 email，或直接從 activity 取得
+          // Teams activity 沒有 email 欄位，這裡可擴充查詢
+          email = ""; // 若有查詢 email 的邏輯可補上
+        } catch {}
+      }
+      // 依 botsimon 專案補齊完整欄位
+      // 依 botsimon upsertTeamInfoToBlob 邏輯，每 user 只存一份且去重
+      const { upsertTeamInfoToBlob } = require("./UploadToBlob");
+      // 取得 email 欄位（如 botsimon 專案）
+      let emailValue = "";
+      if (from?.aadObjectId) {
+        try {
+          // 完全比照 botsimon: 只用 Graph API 查詢 email
+          try {
+            const { ConfidentialClientApplication } = require("@azure/msal-node");
+            const { Client } = require("@microsoft/microsoft-graph-client");
+            const msalConfig = {
+              auth: {
+                clientId: process.env.AZURE_AD_CLIENT_ID || "",
+                authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID || ""}`,
+                clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
+              },
+            };
+            const msal = new ConfidentialClientApplication(msalConfig);
+            const result = await msal.acquireTokenByClientCredential({
+              scopes: ["https://graph.microsoft.com/.default"],
+            });
+            const accessToken = result?.accessToken;
+            if (accessToken) {
+              const client = Client.init({
+                authProvider: (done: any) => done(null, accessToken),
+              });
+              const userObj = await client.api(`/users/${from.aadObjectId}`).get();
+              console.log("[teamsBot] Graph API userObj:", userObj);
+              console.log("[teamsBot] userObj.mail:", userObj.mail, "userObj.userPrincipalName:", userObj.userPrincipalName);
+              if (userObj.mail && userObj.mail.includes("@")) emailValue = userObj.mail;
+              else if (userObj.userPrincipalName && userObj.userPrincipalName.includes("@")) emailValue = userObj.userPrincipalName;
+              else emailValue = "";
+            }
+          } catch (e) {
+            console.error("[teamsBot] 取得 email 失敗", e);
+          }
+        } catch {}
+      }
+      const teamInfo = {
+        from: {
+          id: from?.id || "unknown",
+          name: from?.name || "",
+          aadObjectId: from?.aadObjectId || "",
+          email: emailValue || ""
+        },
+        conversation: {
+          id: conversation?.id || "",
+          tenantId: conversation?.tenantId || "",
+          conversationType: conversation?.conversationType || ""
+        },
+        channelId: context.activity.channelId,
+        serviceUrl: context.activity.serviceUrl,
+        recipient: context.activity.recipient,
+        time: context.activity.timestamp
+      };
+      await upsertTeamInfoToBlob("teamsUser.json", teamInfo);
+      console.log("[teamsBot] 已 upsert user info to blob", teamInfo.from.id);
+    } catch (err) {
+      console.error("[teamsBot] blob 寫入失敗", err);
     }
-    if (!email) {
-      console.error("No email found, not writing to blob, user:", context.activity.from);
-      return;
-    }
-    talkerInfo.user.email = email;
-    await insertToBlob(talkerInfo);
   }
 );
 
-// Regex and function-based fallback handlers
 teamsBot.activity(/^message/, async (context: TurnContext, state: ApplicationTurnState) => {
   await context.sendActivity(`Matched with regex: ${context.activity.type}`);
 });
+
 teamsBot.activity(
   async (context: TurnContext) => Promise.resolve(context.activity.type === "message"),
   async (context, state) => {

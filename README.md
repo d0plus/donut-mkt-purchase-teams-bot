@@ -8,12 +8,6 @@ Examples of Microsoft Teams bots in everyday use include:
 
 A bot interaction can be a quick question and answer, or it can be a complex conversation. Being a cloud application, a bot can provide valuable and secure access to cloud services and corporate resources.
 
-## 環境變數與安全性
-
-> **重要提醒**
-> 請務必於專案根目錄建立 `.env` 檔案，並依照 `.env.example` 設定所有敏感資訊（如 clientId、clientSecret、connectionString、email 等）。
-> `.env` 已加入 `.gitignore`，請勿將敏感資訊推送至 GitHub。
-
 ## Get started with the Basic Bot template
 
 > **Prerequisites**

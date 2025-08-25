@@ -1,5 +1,5 @@
 {
-    "name": "botsimon",
+    "name": "temasmessagebotmkt",
     "version": "1.0.0",
     "description": "Microsoft 365 Agents Toolkit echo bot sample",
     "engines": {
@@ -23,25 +23,21 @@
         "url": "https://github.com"
     },
     "dependencies": {
-        "@azure/functions": "^4.7.2-preview",
+        "@azure/msal-node": "^3.7.2",
         "@azure/storage-blob": "^12.28.0",
-        "@microsoft/agents-activity": "^1.0.0",
         "@microsoft/agents-hosting": "^0.2.14",
         "@microsoft/microsoft-graph-client": "^3.0.7",
-        "@types/node-fetch": "^2.6.13",
         "dotenv": "^17.2.1",
         "express": "^5.0.1",
-        "isomorphic-fetch": "^3.0.0",
-        "node-fetch": "^2.7.0"
+        "isomorphic-fetch": "^3.0.0"
     },
     "devDependencies": {
         "@types/express": "^5.0.0",
-        "@types/jest": "^30.0.0",
-        "@types/node": "^18.0.0",
+        "@types/node": "^18.19.123",
         "env-cmd": "^10.1.0",
         "nodemon": "^3.1.7",
         "shx": "^0.3.3",
         "ts-node": "^10.4.0",
-        "typescript": "^5.9.2"
+        "typescript": "^4.4.4"
     }
 }

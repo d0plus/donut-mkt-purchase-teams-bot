@@ -3,13 +3,31 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import * as dotenv from "dotenv";
 dotenv.config();
 
+import { v4 as uuidv4 } from "uuid";
 
-export async function uploadTextToBlob(blobName: string, content: string) {
+export async function uploadTextToBlob(blobName: string, data: { user: string; type: string; status: string }) {
+  console.log("[uploadTextToBlob] start", { blobName, data });
   const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING!);
   const containerClient = blobServiceClient.getContainerClient(process.env.AZURE_BLOB_CONTAINER!);
   const blockBlobClient = containerClient.getBlockBlobClient(blobName);
-  await blockBlobClient.upload(content, Buffer.byteLength(content));
-  console.log(`Uploaded ${blobName} to ${process.env.AZURE_BLOB_CONTAINER}`);
+
+  // 依 botsimon 格式包裝
+  const json = {
+    id: uuidv4(),
+    name: blobName,
+    timestamp: new Date().toISOString(),
+    description: "這是一個寫入 Azure Blob 的範例 JSON 檔案",
+    data
+  };
+
+  const content = JSON.stringify(json, null, 2);
+  try {
+    await blockBlobClient.upload(content, Buffer.byteLength(content));
+    console.log(`[uploadTextToBlob] Uploaded ${blobName} to ${process.env.AZURE_BLOB_CONTAINER}`);
+  } catch (err) {
+    console.error("[uploadTextToBlob] upload failed", err);
+    throw err;
+  }
 }
 /* Upsert data to blob by teamsid, remove duplicates by id */
 export async function upsertTeamInfoToBlob(blobName: string, teamInfo: { from: { id: string }, [key: string]: any }) {
@@ -92,7 +110,7 @@ export async function upsertTeamInfoToBlob(blobName: string, teamInfo: { from: {
 
 /* CLI test: upload "hello world" as test.txt */
 if (require.main === module) {
-  uploadTextToBlob("test.txt", "hello world").catch(console.error);
+  uploadTextToBlob("test.txt", { user: "simon", type: "sample", status: "active" }).catch(console.error);
 }
 /* Utility: fix blob to array format, keep one per user */
 export async function fixBlobToArrayFormat(blobName: string) {

@@ -11,7 +11,7 @@ provision:
   - uses: teamsApp/create
     with:
       # app name
-      name: botsimon${{APP_NAME_SUFFIX}}
+      name: TemasMessageBot_MKT${{APP_NAME_SUFFIX}}
     # Write the information of created resources into environment file for
     # the specified environment variable(s).
     writeToEnvironmentFile:
@@ -128,4 +128,4 @@ publish:
     # the specified environment variable(s).
     writeToEnvironmentFile:
       publishedAppId: TEAMS_APP_PUBLISHED_APP_ID
-projectId: ${{PROJECT_ID}}
+projectId: 24d82378-fa59-4a10-96fe-6c3009a9ce93

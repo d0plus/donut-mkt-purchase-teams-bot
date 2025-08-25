@@ -14,12 +14,12 @@
         "outline": "outline.png"
     },
     "name": {
-        "short": "botsimon${{APP_NAME_SUFFIX}}",
-        "full": "full name for botsimon"
+        "short": "TemasMessageBot_MKT${{APP_NAME_SUFFIX}}",
+        "full": "full name for TemasMessageBot_MKT"
     },
     "description": {
-        "short": "short description for botsimon",
-        "full": "full description for botsimon"
+        "short": "short description for TemasMessageBot_MKT",
+        "full": "full description for TemasMessageBot_MKT"
     },
     "accentColor": "#FFFFFF",
     "bots": [

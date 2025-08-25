@@ -2,7 +2,7 @@
   "compilerOptions": {
     "declaration": true,
     "target": "es2017",
-    "module": "NodeNext",
+    "module": "nodenext",
     "outDir": "./lib",
     "rootDir": "./",
     "moduleResolution": "nodenext",
@@ -11,11 +11,5 @@
     "tsBuildInfoFile": "./lib/.tsbuildinfo",
     "resolveJsonModule": true,
     "esModuleInterop": true,
-    "types": ["jest"],
-    "lib": ["es2017", "ESNext", "DOM"]
   }
-,
-  "include": [
-    "*.ts"
-  ]
 }
