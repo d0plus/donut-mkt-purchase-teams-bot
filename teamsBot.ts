@@ -51,14 +51,7 @@ teamsBot.message("/runtime", async (context: TurnContext, state: ApplicationTurn
   await context.sendActivity(JSON.stringify(runtime));
 });
 
-teamsBot.conversationUpdate(
-  "membersAdded",
-  async (context: TurnContext, state: ApplicationTurnState) => {
-    await context.sendActivity(
-      `Hi there! I'm an echo bot running on Agents SDK version ${version} that will echo what you said to me.`
-    );
-  }
-);
+/* 歡迎訊息已移除 */
 
 // Listen for ANY message to be received. MUST BE AFTER ANY OTHER MESSAGE HANDLERS
 teamsBot.activity(
