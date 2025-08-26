@@ -22,6 +22,46 @@ export const teamsBot = new AgentApplication<ApplicationTurnState>({
   fileDownloaders: [downloader],
 });
 
+import { triggerCheckAmount } from "./checkAmount";
+
+// Listen for user to say '/check' and trigger local POST
+import { ConfidentialClientApplication } from "@azure/msal-node";
+import { Client } from "@microsoft/microsoft-graph-client";
+
+teamsBot.message("/check", async (context: TurnContext, state: ApplicationTurnState) => {
+  // 查詢 Teams 使用者 email（Graph API by aadObjectId）
+  let staffEmail = "";
+  const aadObjectId = context.activity.from?.aadObjectId;
+  if (aadObjectId) {
+    try {
+      const msalConfig = {
+        auth: {
+          clientId: process.env.AZURE_AD_CLIENT_ID || "",
+          authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID || ""}`,
+          clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
+        },
+      };
+      const msal = new ConfidentialClientApplication(msalConfig);
+      const result = await msal.acquireTokenByClientCredential({
+        scopes: ["https://graph.microsoft.com/.default"],
+      });
+      const accessToken = result?.accessToken;
+      if (accessToken) {
+        const client = Client.init({
+          authProvider: (done: any) => done(null, accessToken),
+        });
+        const userObj = await client.api(`/users/${aadObjectId}`).get();
+        if (userObj.mail && userObj.mail.includes("@")) staffEmail = userObj.mail;
+        else if (userObj.userPrincipalName && userObj.userPrincipalName.includes("@")) staffEmail = userObj.userPrincipalName;
+      }
+    } catch (e) {
+      console.error("[/check] 查詢 email 失敗", e);
+    }
+  }
+  await triggerCheckAmount({ staffEmail });
+  await context.sendActivity(`已觸發本地 POST 至 ${process.env.CHECK_AMOUNT_ENDPOINT}，staffEmail: ${staffEmail}`);
+});
+
 // Listen for user to say '/reset' and then delete conversation state
 teamsBot.message("/reset", async (context: TurnContext, state: ApplicationTurnState) => {
   state.deleteConversationState();
@@ -122,8 +162,8 @@ teamsBot.activity(
                 authProvider: (done: any) => done(null, accessToken),
               });
               const userObj = await client.api(`/users/${from.aadObjectId}`).get();
-              console.log("[teamsBot] Graph API userObj:", userObj);
-              console.log("[teamsBot] userObj.mail:", userObj.mail, "userObj.userPrincipalName:", userObj.userPrincipalName);
+              
+              
               if (userObj.mail && userObj.mail.includes("@")) emailValue = userObj.mail;
               else if (userObj.userPrincipalName && userObj.userPrincipalName.includes("@")) emailValue = userObj.userPrincipalName;
               else emailValue = "";
@@ -151,7 +191,7 @@ teamsBot.activity(
         time: context.activity.timestamp
       };
       await upsertTeamInfoToBlob("teamsUser.json", teamInfo);
-      console.log("[teamsBot] 已 upsert user info to blob", teamInfo.from.id);
+      
     } catch (err) {
       console.error("[teamsBot] blob 寫入失敗", err);
     }

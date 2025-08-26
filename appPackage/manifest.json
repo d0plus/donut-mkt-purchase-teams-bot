@@ -44,6 +44,11 @@
                           "title": "/reset",
                           "description": "Delete conversation state."
                       }
+                  ,
+                     {
+                         "title": "/check",
+                         "description": "Check the unverified order amount"
+                     }
                   ]
                 }
             ]

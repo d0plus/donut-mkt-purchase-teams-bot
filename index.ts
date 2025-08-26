@@ -69,13 +69,13 @@ server.post("/api/webpost", async (req: Request, res: Response) => {
   }
   try {
     // 完全比照 botsimon：只通知 staff，不寫入 webpost blob
-    console.log("[/api/webpost] 收到 POST:", req.body);
+    
     const staffEmail = req.body.staffEmail || "";
     const text = req.body.text;
     const content = req.body.content;
     // webpost 直接取 text 欄位內容
     const message = typeof text === "string" ? text : "you got order";
-    console.log("[/api/webpost] 將發送 Teams message:", message);
+    
 
     // 讀取 tokens.json from Azure blob
     const blobServiceClient = BlobServiceClient.fromConnectionString(process.env.AZURE_STORAGE_CONNECTION_STRING!);
