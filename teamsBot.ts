@@ -10,8 +10,30 @@ import { version } from "@microsoft/agents-hosting/package.json";
 
 interface ConversationState {
   count: number;
+  staffEmail?: string;
+  checkStep?: string;
 }
 type ApplicationTurnState = TurnState<ConversationState>;
+// 包裝 state.save，遇到 eTag 衝突自動重試
+async function saveStateWithRetry(state: any, context: any, storage: any, maxRetry = 3) {
+  let retry = 0;
+  while (retry < maxRetry) {
+    try {
+      await state.save(context, storage);
+      return;
+    } catch (err: any) {
+      if (err.message && err.message.includes("eTag conflict")) {
+        // 僅記錄，不傳送給使用者
+        console.warn("eTag conflict, retrying...");
+        await state.load(context, storage);
+        retry++;
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error("state.save failed after retry due to eTag conflict");
+}
 
 const downloader = new AttachmentDownloader();
 
@@ -58,8 +80,155 @@ teamsBot.message("/check", async (context: TurnContext, state: ApplicationTurnSt
       console.error("[/check] 查詢 email 失敗", e);
     }
   }
-  await triggerCheckAmount({ staffEmail });
-  await context.sendActivity(`已觸發本地 POST 至 ${process.env.CHECK_AMOUNT_ENDPOINT}，staffEmail: ${staffEmail}`);
+  // 若查不到 email，預設用 Teams 名稱+ID組合
+  if (!staffEmail) {
+    staffEmail = context.activity.from?.name
+      ? `${context.activity.from.name}_${context.activity.from.id || ""}`
+      : context.activity.from?.id || "unknown";
+  }
+
+  // 顯示選單
+  await context.sendActivity({
+    type: "message",
+    text: "請選擇查詢動作，請輸入數字：\n\n1️⃣ 查詢帳單總數\n2️⃣ 依日期區間查詢\n3️⃣ 查詢最新 X 筆訂單",
+  } as any);
+
+  // 儲存 staffEmail 於 state 供後續步驟使用
+  state.conversation.staffEmail = staffEmail;
+  state.conversation.checkStep = "awaitOption";
+});
+
+// 處理 /check 後續互動
+teamsBot.activity(ActivityTypes.Message, async (context: TurnContext, state: ApplicationTurnState) => {
+  try {
+    await state.load(context, storage);
+    // 若為 webPost 訊息（如新訂單通知），直接 return，不進行任何固定訊息回覆
+    if (context.activity.channelData && context.activity.channelData.webPost === true && context.activity.text && context.activity.text.startsWith("有新訂單：")) {
+      await context.sendActivity(context.activity.text);
+      return;
+    }
+    // 若在 /check 流程中，不進行 fallback handler 的 state.save
+    // 已移除選單流程
+    if (state.conversation.checkStep === "awaitOption" && state.conversation.staffEmail) {
+      const option = (context.activity.text || "").trim();
+      if (option === "1") {
+        // 查詢所有帳單
+        const axios = require("axios");
+        try {
+          // 查詢全部訂單
+          const resp = await axios.post("https://4dd94d1be57f.ngrok-free.app/option/all", {
+            staffEmail: state.conversation.staffEmail
+          });
+          if (resp.data && Array.isArray(resp.data.orders)) {
+            await context.sendActivity(`訂單總數：${resp.data.orders.length}`);
+          } else {
+            await context.sendActivity("查無訂單資料。");
+          }
+        } catch (err) {
+          await context.sendActivity("查詢失敗，請稍後再試。");
+        }
+        state.conversation.checkStep = undefined;
+        await saveStateWithRetry(state, context, storage);
+        return;
+      } else if (option === "2") {
+        await context.sendActivity('請輸入查詢日期區間，格式 = "01-01-2020 to 10-01-2020"');
+        state.conversation.checkStep = "awaitDateRange";
+        await saveStateWithRetry(state, context, storage);
+        return;
+      } else if (option === "3") {
+        await context.sendActivity("請輸入要查詢的最新訂單數量（數字）：");
+        state.conversation.checkStep = "awaitLatestOrderCount";
+        await saveStateWithRetry(state, context, storage);
+        return;
+      } else {
+        await context.sendActivity("請輸入 1、2 或 3。");
+        await saveStateWithRetry(state, context, storage);
+        return;
+      }
+    }
+    if (state.conversation.checkStep === "awaitLatestOrderCount" && state.conversation.staffEmail) {
+      const countInput = (context.activity.text || "").trim();
+      const axios = require("axios");
+      const count = Math.max(1, parseInt(countInput, 10) || 1);
+      try {
+        const resp = await axios.post("https://4dd94d1be57f.ngrok-free.app/option/latest-by-email", {
+          staffEmail: state.conversation.staffEmail,
+          count
+        });
+        if (resp.data && Array.isArray(resp.data.orders) && resp.data.orders.length > 0) {
+          let msg = `最新 ${count} 筆訂單：\n`;
+          resp.data.orders.forEach((order: any, idx: number) => {
+            msg += `#${idx + 1}\n`;
+            if (order.clientName) msg += `客戶：${order.clientName}\n`;
+            if (order.poNumber) msg += `PO：${order.poNumber}\n`;
+            if (order.amount) msg += `金額：${order.amount}\n`;
+            if (order.createdAt) msg += `建立時間：${new Date(order.createdAt).toLocaleString("zh-TW", { timeZone: "Asia/Shanghai" })}\n`;
+            msg += "----------------------\n";
+          });
+          await context.sendActivity(msg);
+        } else {
+          await context.sendActivity("查無訂單資料。");
+        }
+      } catch (err) {
+        let errMsg = "查詢失敗，請稍後再試。";
+        if (err && err.message) errMsg += `\n${err.message}`;
+        if (err && err.response && err.response.data) errMsg += `\n${JSON.stringify(err.response.data)}`;
+        await context.sendActivity(errMsg);
+      }
+      state.conversation.checkStep = undefined;
+      await saveStateWithRetry(state, context, storage);
+      return;
+    }
+    if (state.conversation.checkStep === "awaitDateRange" && state.conversation.staffEmail) {
+      const dateInput = (context.activity.text || "").trim();
+      // 解析日期格式 "dd-mm-yyyy to dd-mm-yyyy"
+      const match = dateInput.match(/^(\d{2}-\d{2}-\d{4})\s*to\s*(\d{2}-\d{2}-\d{4})$/);
+      if (match) {
+        // 轉換 dd-mm-yyyy 為 yyyy-mm-dd
+        const [d1, m1, y1] = match[1].split("-");
+        const [d2, m2, y2] = match[2].split("-");
+        const startDate = new Date(`${y1}-${m1}-${d1}T00:00:00Z`).toISOString();
+        const endDate = new Date(`${y2}-${m2}-${d2}T23:59:59Z`).toISOString();
+        const axios = require("axios");
+        try {
+          const resp = await axios.post("https://4dd94d1be57f.ngrok-free.app/option/all", {
+            staffEmail: state.conversation.staffEmail,
+            startDate,
+            endDate
+          });
+          if (resp.data && Array.isArray(resp.data.orders)) {
+            await context.sendActivity(`區間訂單數：${resp.data.orders.length}`);
+          } else {
+            await context.sendActivity("查無訂單資料。");
+          }
+        } catch (err) {
+          await context.sendActivity("查詢失敗，請稍後再試。");
+        }
+      } else {
+        await context.sendActivity("日期格式錯誤，請重新輸入（格式：01-01-2020 to 10-01-2020）");
+      }
+      state.conversation.checkStep = undefined;
+      await saveStateWithRetry(state, context, storage);
+      return;
+    }
+    if (state.conversation.checkStep === "awaitCount" && state.conversation.staffEmail) {
+      const countInput = (context.activity.text || "").trim();
+      const { handleOrderCheckByCount } = require("./orderCheckByCount");
+      await handleOrderCheckByCount(context, state, countInput);
+      state.conversation.checkStep = undefined;
+      await saveStateWithRetry(state, context, storage);
+      return;
+    }
+    // 非 /check 流程才回覆固定訊息
+    /* await context.sendActivity("我已收到你的訊息，機器人已啟動，你可以輸入 /check 使用額外功能"); */
+  } catch (err: any) {
+    if (err && err.message && err.message.includes("eTag conflict")) {
+      // 僅記錄，不回傳 Teams
+      console.warn("eTag conflict (outer handler), ignored.");
+    } else {
+      throw err;
+    }
+  }
 });
 
 // Listen for user to say '/reset' and then delete conversation state
@@ -94,117 +263,4 @@ teamsBot.message("/runtime", async (context: TurnContext, state: ApplicationTurn
 /* 歡迎訊息已移除 */
 
 // Listen for ANY message to be received. MUST BE AFTER ANY OTHER MESSAGE HANDLERS
-teamsBot.activity(
-  ActivityTypes.Message,
-  async (context: TurnContext, state: ApplicationTurnState) => {
-    // Increment count state
-    let count = state.conversation.count ?? 0;
-    state.conversation.count = ++count;
 
-    // Log received Teams message
-    console.log("[teamsBot] 收到 Teams 訊息：", {
-      from: context.activity.from,
-      text: context.activity.text,
-      conversation: context.activity.conversation,
-      channelId: context.activity.channelId,
-      timestamp: context.activity.timestamp
-    });
-
-    // 若來自 webPost，直接回覆 payload.text
-    if (context.activity.channelData && context.activity.channelData.webPost && context.activity.text) {
-      await context.sendActivity(context.activity.text);
-    } else {
-      // 回覆固定繁體中文訊息
-      await context.sendActivity("我已收到你的訊息，目前機器人運作正常");
-    }
-
-    // 新增：收到 Teams 訊息時寫入 blob
-    try {
-      const { from, text, conversation, channelId, timestamp } = context.activity;
-      // 直接靜態 import，避免動態 import 路徑錯誤
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { uploadTextToBlob } = require("./UploadToBlob");
-      const blobName = `teamsmsg-${Date.now()}.json`;
-      // 取得 email 欄位（如 botsimon 專案）
-      let email = "";
-      if (from?.aadObjectId) {
-        try {
-          // 這裡可根據實際情境呼叫 Graph API 查詢 email，或直接從 activity 取得
-          // Teams activity 沒有 email 欄位，這裡可擴充查詢
-          email = ""; // 若有查詢 email 的邏輯可補上
-        } catch {}
-      }
-      // 依 botsimon 專案補齊完整欄位
-      // 依 botsimon upsertTeamInfoToBlob 邏輯，每 user 只存一份且去重
-      const { upsertTeamInfoToBlob } = require("./UploadToBlob");
-      // 取得 email 欄位（如 botsimon 專案）
-      let emailValue = "";
-      if (from?.aadObjectId) {
-        try {
-          // 完全比照 botsimon: 只用 Graph API 查詢 email
-          try {
-            const { ConfidentialClientApplication } = require("@azure/msal-node");
-            const { Client } = require("@microsoft/microsoft-graph-client");
-            const msalConfig = {
-              auth: {
-                clientId: process.env.AZURE_AD_CLIENT_ID || "",
-                authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID || ""}`,
-                clientSecret: process.env.AZURE_AD_CLIENT_SECRET || "",
-              },
-            };
-            const msal = new ConfidentialClientApplication(msalConfig);
-            const result = await msal.acquireTokenByClientCredential({
-              scopes: ["https://graph.microsoft.com/.default"],
-            });
-            const accessToken = result?.accessToken;
-            if (accessToken) {
-              const client = Client.init({
-                authProvider: (done: any) => done(null, accessToken),
-              });
-              const userObj = await client.api(`/users/${from.aadObjectId}`).get();
-              
-              
-              if (userObj.mail && userObj.mail.includes("@")) emailValue = userObj.mail;
-              else if (userObj.userPrincipalName && userObj.userPrincipalName.includes("@")) emailValue = userObj.userPrincipalName;
-              else emailValue = "";
-            }
-          } catch (e) {
-            console.error("[teamsBot] 取得 email 失敗", e);
-          }
-        } catch {}
-      }
-      const teamInfo = {
-        from: {
-          id: from?.id || "unknown",
-          name: from?.name || "",
-          aadObjectId: from?.aadObjectId || "",
-          email: emailValue || ""
-        },
-        conversation: {
-          id: conversation?.id || "",
-          tenantId: conversation?.tenantId || "",
-          conversationType: conversation?.conversationType || ""
-        },
-        channelId: context.activity.channelId,
-        serviceUrl: context.activity.serviceUrl,
-        recipient: context.activity.recipient,
-        time: context.activity.timestamp
-      };
-      await upsertTeamInfoToBlob("teamsUser.json", teamInfo);
-      
-    } catch (err) {
-      console.error("[teamsBot] blob 寫入失敗", err);
-    }
-  }
-);
-
-teamsBot.activity(/^message/, async (context: TurnContext, state: ApplicationTurnState) => {
-  await context.sendActivity(`Matched with regex: ${context.activity.type}`);
-});
-
-teamsBot.activity(
-  async (context: TurnContext) => Promise.resolve(context.activity.type === "message"),
-  async (context, state) => {
-    await context.sendActivity(`Matched function: ${context.activity.type}`);
-  }
-);
